@@ -7,6 +7,9 @@ using TMPro;
 [RequireComponent(typeof(Camera))]
 public class tela1 : MonoBehaviour
 {
+    [Header("Aparência da teia")]
+    [SerializeField] private float _teiaEspessura = 0.05f; // espessura das linhas da malha principal (unidades de conteúdo)
+
     private Material _mat;
     private Camera   _cam;
     private Vector2[] _basePos;
@@ -17,6 +20,7 @@ public class tela1 : MonoBehaviour
 
     private const int   COUNT         = 1300;  // densidade total de pontos da teia
     private const float ALPHA_DIST    = 2.0f;  // distância usada para esmaecer linhas longas
+    private const float TEIA_ESCALA   = 0.72f; // encolhe a teia toda (mais 10% em cima dos 20% já aplicados) pra nada ficar cortado fora da tela
     private const float ROTATION_Z    = 90f;   // tela física rotacionada (mesmo sentido do texto)
     private const float CONTENT_W     = 17.0f; // largura total ocupada pelas letras (eixo x local)
     private const float CONTENT_H     = 9.6f;  // altura total ocupada pelas letras (eixo y local)
@@ -55,29 +59,6 @@ public class tela1 : MonoBehaviour
     private const float AMBIENTE_ALPHA      = 0.3f;
     private const float AMBIENTE_ALPHA_DIST = 2.0f;
     private const float AMBIENTE_VIBRACAO   = 0.65f; // o quanto o sopro faz a teia ambiente tremer
-
-    // ── texto de fundo "PROPAGAR" — cada LETRA é um elemento separado (P R O /
-    // P A / G A R), com espaço de sobra entre os três grupos; ao soprar, cada
-    // letra voa pra um lado diferente, e na reconexão elas voltam ao lugar ──
-    private static readonly (char letra, float x, float y)[] FUNDO_LETRAS =
-    {
-        ('P', -260f,  520f), ('R', 0f,  520f), ('O', 260f,  520f), // PRO (espaço básico a mais)
-        ('P', -130f,    0f), ('A', 130f,    0f),                    // PA
-        ('G', -280f, -520f), ('A', 0f, -520f), ('R', 280f, -520f),  // GAR (um pouco mais esticado)
-    };
-
-    private RectTransform[]    _fundoRts  = new RectTransform[FUNDO_LETRAS.Length];
-    private TextMeshProUGUI[]  _fundoTmps = new TextMeshProUGUI[FUNDO_LETRAS.Length];
-    private Vector2[]          _fundoPosBase = new Vector2[FUNDO_LETRAS.Length]; // posição de repouso de cada letra
-    private Vector2[]          _fundoDirecoes = new Vector2[FUNDO_LETRAS.Length]; // sorteada a cada dispersão
-    private Vector2[]          _fundoPosOrigemReconexao = new Vector2[FUNDO_LETRAS.Length];
-    private float              _dispersaoTimer;
-
-    private const float FUNDO_ALPHA              = 0.42f; // bem mais aparente
-    private const float FUNDO_FONTE              = 380f;  // tamanho fixo de cada letra
-    private const float FUNDO_DISPERSAO_DIST     = 1400f; // o quanto cada letra se afasta ao espalhar
-    private const float FUNDO_DISPERSAO_DURACAO  = 2.2f;  // tempo aproximado, sincronizado com a dispersão da teia
-    private const float FUNDO_DESVIO_MAX         = 45f;   // variação de ângulo pra cada letra ir pra um lado diferente
 
     // ── estado geral (sopro → teia se espalha (já soltando palavras) → palavras → reconecta) ──
     enum Estado { Normal, Dispersando, Palavras, Reconectando }
@@ -204,10 +185,11 @@ public class tela1 : MonoBehaviour
 
     // ── máscara "PROPAGAR" — as 3 linhas (PRO / PA / GAR) são renderizadas de
     // verdade (TextMeshPro) numa textura preto-e-branco, uma única vez; os
-    // pontos da teia só nascem na parte PRETA (fundo) dessa textura — a letra
-    // fica como um vazio dentro da malha, um espaço negativo.
+    // pontos da teia só nascem na parte BRANCA (as letras) dessa textura —
+    // a teia preenche as letras, o resto da tela fica sem pontos.
     private Color32[] _mascaraPixels;
     private int       _mascaraW, _mascaraH;
+
     private static readonly string[] MASCARA_LINHAS = { "PRO", "PA", "GAR" };
     private const int MASCARA_RESOLUCAO_X = 1024; // resolução da textura de máscara (largura)
 
@@ -434,6 +416,15 @@ public class tela1 : MonoBehaviour
     // cima de uma letra na máscara — pixel branco. Fundo (preto) = false.
     bool MascaraEhLetra(float x, float y)
     {
+        // a tela final gira o conteúdo em ROTATION_Z por cima deste espaço (ver
+        // OnPostRender), o que deixava a teia espelhada e de ponta cabeça em
+        // relação à máscara renderizada "normal" (PRO topo / PA meio / GAR
+        // base, sem inversão). Girar a amostragem 180° aqui (x,y → -x,-y)
+        // corrige os dois problemas de uma vez, sem precisar mexer nas
+        // strings ou na ordem das linhas em ConstruirMascaraLetras().
+        x = -x;
+        y = -y;
+
         int px = Mathf.Clamp(Mathf.FloorToInt((x + CONTENT_W * 0.5f) / CONTENT_W * _mascaraW), 0, _mascaraW - 1);
         int py = Mathf.Clamp(Mathf.FloorToInt((y + CONTENT_H * 0.5f) / CONTENT_H * _mascaraH), 0, _mascaraH - 1);
         return _mascaraPixels[py * _mascaraW + px].r > 128;
@@ -441,8 +432,8 @@ public class tela1 : MonoBehaviour
 
     // =====================================================================
     // GERAÇÃO DE PONTOS — sorteia posições por toda a área de conteúdo e só
-    // aceita as que caem no FUNDO (preto) da máscara; as letras ficam vazias,
-    // sem pontos, aparecendo como espaço negativo dentro da teia.
+    // aceita as que caem nas partes BRANCAS (as letras) da máscara; a teia
+    // preenche as letras, o resto da tela fica sem pontos.
     // =====================================================================
     void GerarPontos()
     {
@@ -453,7 +444,7 @@ public class tela1 : MonoBehaviour
             {
                 px = Random.Range(-CONTENT_W * 0.5f, CONTENT_W * 0.5f);
                 py = Random.Range(-CONTENT_H * 0.5f, CONTENT_H * 0.5f);
-                if (!MascaraEhLetra(px, py)) break; // caiu no fundo, serve
+                if (MascaraEhLetra(px, py)) break; // caiu numa parte branca (letra), serve
             }
             _basePos[i] = new Vector2(px, py);
         }
@@ -481,13 +472,32 @@ public class tela1 : MonoBehaviour
             AdicionarAresta(arestasUnicas, t.c, t.a);
         }
 
-        _edgeA = arestasUnicas.Select(e => e.Item1).ToArray();
-        _edgeB = arestasUnicas.Select(e => e.Item2).ToArray();
+        // Delaunay não sabe nada sobre "buracos" de letra — sem esse filtro,
+        // ele conecta pontos que estão dos dois lados do vão de um O/P/R/A/G
+        // (ou até de uma letra pra outra), tampando o buraco e virando uma
+        // mancha sólida em vez da letra. Só mantém a aresta se o segmento
+        // inteiro passar por cima de partes brancas (letra) da máscara.
+        var arestasValidas = arestasUnicas.Where(e => ArestaDentroDaLetra(e.Item1, e.Item2));
+
+        _edgeA = arestasValidas.Select(e => e.Item1).ToArray();
+        _edgeB = arestasValidas.Select(e => e.Item2).ToArray();
     }
 
     void AdicionarAresta(HashSet<(int, int)> set, int i, int j)
     {
         set.Add(i < j ? (i, j) : (j, i));
+    }
+
+    private const int ARESTA_AMOSTRAS = 6; // pontos verificados ao longo do segmento
+    bool ArestaDentroDaLetra(int i, int j)
+    {
+        Vector2 a = _basePos[i], b = _basePos[j];
+        for (int s = 1; s < ARESTA_AMOSTRAS; s++)
+        {
+            Vector2 p = Vector2.Lerp(a, b, (float)s / ARESTA_AMOSTRAS);
+            if (!MascaraEhLetra(p.x, p.y)) return false;
+        }
+        return true;
     }
 
     // =====================================================================
@@ -507,8 +517,6 @@ public class tela1 : MonoBehaviour
         canvasGO.AddComponent<GraphicRaycaster>();
         _canvasTransform = canvasGO.transform;
 
-        ConstruirTextoFundo(); // fica atrás de tudo (é criado primeiro)
-
         GameObject textGO = new GameObject("Label");
         textGO.transform.SetParent(canvasGO.transform, false);
 
@@ -527,53 +535,6 @@ public class tela1 : MonoBehaviour
         rt.anchoredPosition = new Vector2(-60f, 0f);
         rt.sizeDelta        = new Vector2(900f, 80f);
         rt.localRotation    = Quaternion.Euler(0f, 0f, -90f);
-    }
-
-    // =====================================================================
-    // TEXTO DE FUNDO — "PROPAGAR" quase transparente, dividido em letras
-    // individuais formando PRO (topo) / PA (meio) / GAR (base), com bastante
-    // espaço entre os três grupos. Fica atrás do "assopre para" e de tudo
-    // mais no canvas. Cada letra se espalha pra um lado próprio ao soprar.
-    // =====================================================================
-    void ConstruirTextoFundo()
-    {
-        GameObject fundoGO = new GameObject("TextoFundo");
-        fundoGO.transform.SetParent(_canvasTransform, false);
-
-        RectTransform fundoRt = fundoGO.AddComponent<RectTransform>();
-        fundoRt.anchorMin        = fundoRt.anchorMax = new Vector2(0.5f, 0.5f);
-        fundoRt.pivot            = new Vector2(0.5f, 0.5f);
-        fundoRt.anchoredPosition = Vector2.zero;
-        fundoRt.sizeDelta        = new Vector2(1080f, 1920f); // cobre a tela toda depois de rotacionar
-        fundoRt.localRotation    = Quaternion.Euler(0f, 0f, -90f); // mesmo sentido dos outros textos
-
-        for (int i = 0; i < FUNDO_LETRAS.Length; i++)
-            CriarLetraFundo(fundoRt, FUNDO_LETRAS[i].letra, new Vector2(FUNDO_LETRAS[i].x, FUNDO_LETRAS[i].y), i);
-    }
-
-    void CriarLetraFundo(RectTransform pai, char letra, Vector2 posBase, int indice)
-    {
-        GameObject go = new GameObject("Fundo_" + letra + indice);
-        go.transform.SetParent(pai, false);
-
-        TextMeshProUGUI tmp = go.AddComponent<TextMeshProUGUI>();
-        tmp.text      = letra.ToString();
-        tmp.color     = new Color(0.227f, 0.180f, 0.122f, FUNDO_ALPHA);
-        tmp.fontStyle = FontStyles.Bold;
-        tmp.alignment = TextAlignmentOptions.Center;
-        tmp.fontSize  = FUNDO_FONTE;
-
-        // âncora fixa no centro do bloco de fundo, deslocada pra posição de
-        // repouso da letra — pra poder animar livremente na dispersão/reconexão.
-        RectTransform rt = go.GetComponent<RectTransform>();
-        rt.anchorMin        = rt.anchorMax = new Vector2(0.5f, 0.5f);
-        rt.pivot            = new Vector2(0.5f, 0.5f);
-        rt.anchoredPosition = posBase;
-        rt.sizeDelta        = new Vector2(380f, 440f);
-
-        _fundoRts[indice]     = rt;
-        _fundoTmps[indice]    = tmp;
-        _fundoPosBase[indice] = posBase;
     }
 
     void Update()
@@ -635,7 +596,6 @@ public class tela1 : MonoBehaviour
     void IniciarDispersao()
     {
         _estado = Estado.Dispersando;
-        _dispersaoTimer = 0f;
         _proximoSpawnEm = 0f; // já libera a primeira palavra assim que a teia começar a sair
         if (_labelInstrucao != null) _labelInstrucao.gameObject.SetActive(false);
 
@@ -646,15 +606,6 @@ public class tela1 : MonoBehaviour
             Vector2 dir     = Quaternion.Euler(0f, 0f, desvio) * baseDir;
             _vel[i] = dir * Random.Range(DISPERSAO_VEL_MIN, DISPERSAO_VEL_MAX);
         }
-
-        // cada letra do fundo sorteia sua própria direção pra fora (a partir
-        // da posição de repouso dela) — assim cada uma vai pra um lado diferente.
-        for (int i = 0; i < FUNDO_LETRAS.Length; i++)
-        {
-            Vector2 baseDir = _fundoPosBase[i].sqrMagnitude > 0.0001f ? _fundoPosBase[i].normalized : Random.insideUnitCircle.normalized;
-            float   desvio  = Random.Range(-FUNDO_DESVIO_MAX, FUNDO_DESVIO_MAX);
-            _fundoDirecoes[i] = Quaternion.Euler(0f, 0f, desvio) * baseDir;
-        }
     }
 
     void AtualizarDispersao()
@@ -664,17 +615,6 @@ public class tela1 : MonoBehaviour
             Vector2 dir = _vel[i].normalized;
             _vel[i] += dir * DISPERSAO_ACEL * Time.deltaTime;
             _pos[i] += _vel[i] * Time.deltaTime;
-        }
-
-        // as letras de fundo se espalham junto, cada uma pro seu lado, sumindo
-        _dispersaoTimer += Time.deltaTime;
-        float t = Mathf.Clamp01(_dispersaoTimer / FUNDO_DISPERSAO_DURACAO);
-        for (int i = 0; i < FUNDO_LETRAS.Length; i++)
-        {
-            _fundoRts[i].anchoredPosition = _fundoPosBase[i] + _fundoDirecoes[i] * (FUNDO_DISPERSAO_DIST * t);
-            Color c = _fundoTmps[i].color;
-            c.a = FUNDO_ALPHA * (1f - t);
-            _fundoTmps[i].color = c;
         }
     }
 
@@ -710,9 +650,6 @@ public class tela1 : MonoBehaviour
             _atrasoReconexao[i]  = Random.Range(0f, RECONEXAO_ATRASO_MAX);
         }
 
-        for (int i = 0; i < FUNDO_LETRAS.Length; i++)
-            _fundoPosOrigemReconexao[i] = _fundoRts[i].anchoredPosition; // de onde a letra está agora, espalhada
-
         _reconexaoTimer = 0f;
         _estado = Estado.Reconectando;
     }
@@ -729,17 +666,6 @@ public class tela1 : MonoBehaviour
 
             float suave = 1f - (1f - tLocal) * (1f - tLocal); // ease-out: desacelera ao chegar no lugar
             _pos[i] = Vector2.Lerp(_posOrigemReconexao[i], _basePos[i], suave);
-        }
-
-        // as letras de fundo voltam junto, cada uma convergindo pro seu lugar de repouso
-        float tFundo      = Mathf.Clamp01(_reconexaoTimer / RECONEXAO_DURACAO_PONTO);
-        float suaveFundo  = 1f - (1f - tFundo) * (1f - tFundo);
-        for (int i = 0; i < FUNDO_LETRAS.Length; i++)
-        {
-            _fundoRts[i].anchoredPosition = Vector2.Lerp(_fundoPosOrigemReconexao[i], _fundoPosBase[i], suaveFundo);
-            Color c = _fundoTmps[i].color;
-            c.a = Mathf.Lerp(0f, FUNDO_ALPHA, suaveFundo);
-            _fundoTmps[i].color = c;
         }
 
         if (todasChegaram)
@@ -914,14 +840,21 @@ public class tela1 : MonoBehaviour
         // cobrir a tela inteira, mesmo que recorte um pouco as bordas.
         float camH   = _cam.orthographicSize * 2f;
         float camW   = camH * _cam.aspect;
-        float scale  = Mathf.Max(camH / CONTENT_W, camW / CONTENT_H);
+        float scale  = Mathf.Max(camH / CONTENT_W, camW / CONTENT_H) * TEIA_ESCALA;
 
         GL.PushMatrix();
         GL.MultMatrix(Matrix4x4.Rotate(Quaternion.Euler(0f, 0f, ROTATION_Z))
                      * Matrix4x4.Scale(new Vector3(scale, scale, 1f)));
 
-        GL.Begin(GL.LINES);
+        // a malha principal (a que forma PRO/PA/GAR) desenha como quads, não
+        // GL.LINES — GL.LINES ignora espessura na maioria das plataformas e
+        // sempre sai com 1px; assim dá pra controlar a espessura de verdade
+        // (mesma técnica usada em teiabg.cs).
+        GL.Begin(GL.QUADS);
         DrawDelaunayMesh();
+        GL.End();
+
+        GL.Begin(GL.LINES);
         if (_estado == Estado.Normal)                                        DrawConexoesTexto();
         if (_estado == Estado.Palavras || _estado == Estado.Dispersando)     DrawTeiaAmbiente();
         GL.End();
@@ -976,6 +909,8 @@ public class tela1 : MonoBehaviour
     // índice da aresta como deslocamento), dando um brilho vivo pra teia.
     void DrawDelaunayMesh()
     {
+        float meiaEspessura = _teiaEspessura * 0.5f;
+
         for (int e = 0; e < _edgeA.Length; e++)
         {
             Vector2 pa = _pos[_edgeA[e]];
@@ -988,9 +923,14 @@ public class tela1 : MonoBehaviour
             float brilho = 1f - TEIA_BRILHO_FORCA + TEIA_BRILHO_FORCA * Mathf.Sin(Time.time * TEIA_BRILHO_VELOCIDADE + e * 0.37f);
             alpha *= brilho;
 
+            Vector2 dir  = dist > 0.0001f ? (pb - pa) / dist : Vector2.right;
+            Vector2 perp = new Vector2(-dir.y, dir.x) * meiaEspessura;
+
             GL.Color(new Color(0.227f, 0.180f, 0.122f, alpha));
-            GL.Vertex3(pa.x, pa.y, 0);
-            GL.Vertex3(pb.x, pb.y, 0);
+            GL.Vertex3(pa.x + perp.x, pa.y + perp.y, 0);
+            GL.Vertex3(pb.x + perp.x, pb.y + perp.y, 0);
+            GL.Vertex3(pb.x - perp.x, pb.y - perp.y, 0);
+            GL.Vertex3(pa.x - perp.x, pa.y - perp.y, 0);
         }
     }
 
