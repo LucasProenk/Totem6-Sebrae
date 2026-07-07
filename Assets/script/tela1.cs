@@ -130,13 +130,13 @@ public class tela1 : MonoBehaviour
 
     // espaçamento entre um spawn e outro — sopro fraco/normal nasce mais devagar,
     // sopro forte sustentado nasce bem mais rápido (mais palavras vindo).
-    private const float PALAVRA_SPAWN_COOLDOWN_FRACO = 0.3f;
-    private const float PALAVRA_SPAWN_COOLDOWN_FORTE = 0.06f;
+    private const float PALAVRA_SPAWN_COOLDOWN_FRACO = 0.22f;
+    private const float PALAVRA_SPAWN_COOLDOWN_FORTE = 0.04f;
 
     // quantas palavras cabem na tela ao mesmo tempo — cresce com a força do sopro
     // (sopro fraco/normal = 6, sopro forte sustentado = até 14 de uma vez).
-    private const int   PALAVRA_MAX_SIMULTANEAS_BASE  = 6;
-    private const int   PALAVRA_MAX_SIMULTANEAS_FORTE = 14;
+    private const int   PALAVRA_MAX_SIMULTANEAS_BASE  = 9;
+    private const int   PALAVRA_MAX_SIMULTANEAS_FORTE = 20;
 
     private const float PALAVRA_CRESCE_FRACAO = 0.15f; // fração inicial do progresso = nascendo/crescendo
     private const float PALAVRA_FADE_FRACAO   = 0.3f;  // fração final do progresso = sumindo

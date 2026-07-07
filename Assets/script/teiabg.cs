@@ -56,7 +56,7 @@ public class teiabg : MonoBehaviour
     private const float INTENSIDADE_SUAVIZACAO   = 1.5f; // o quanto a intensidade pode subir/descer por segundo
 
     private const float VIBRACAO_FREQUENCIA     = 22f;   // quão rápido é o tremor (mais alto = mais "zumbido")
-    private const float VIBRACAO_AMPLITUDE_MAX  = 0.05f; // deslocamento máx. do tremor no pico da intensidade — pequeno de propósito
+    private const float VIBRACAO_AMPLITUDE_MAX  = 0.09f; // deslocamento máx. do tremor no pico da intensidade
     private const float INTENSIDADE_BRILHO_MULT = 2f;    // brilho pulsa até 3x mais forte no pico
     private const float INTENSIDADE_ALPHA_EXTRA = 0.4f;  // aumenta a opacidade máxima no pico
 
