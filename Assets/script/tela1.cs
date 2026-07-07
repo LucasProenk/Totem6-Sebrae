@@ -80,12 +80,14 @@ public class tela1 : MonoBehaviour
     private float   _forcaSopro;
     private const float FORCA_SOPRO_SUAVIZACAO = 0.55f; // o quanto _forcaSopro pode mudar por segundo (menor = mais suave/lento)
 
-    private const float SOPRO_LIMIAR_INICIO       = 0.026f; // sopro mais forte, exigido só pra DISPARAR a dispersão (evita ativar à toa)
-    private const float SOPRO_LIMIAR_PALAVRAS     = 0.008f; // sopro durante as palavras — bem mais sensível, pega sopro bem leve
-    private const float SOPRO_LIMIAR_FORTE        = 0.09f;  // volume a partir do qual o sopro conta como "forte" — mais palavras, voo mais longe e mais fundo
-    private const float SOPRO_MIN_DURACAO         = 0.18f;  // segundos seguidos acima do limiar de início pra confirmar sopro de verdade
-    private const float SOPRO_MIN_DURACAO_PALAVRAS = 0.10f; // idem, mas pro limiar das palavras — reage mais rápido a um sopro leve
-    private const float SOPRO_GRACA       = 0.25f;  // segundos de tolerância antes de considerar que parou de soprar
+    [Header("Sensibilidade do microfone (sopro)")]
+    [SerializeField] private float SOPRO_LIMIAR_INICIO       = 0.085f; // sopro mais forte, exigido só pra DISPARAR a dispersão (evita ativar à toa ou com a voz)
+    [SerializeField] private float SOPRO_LIMIAR_PALAVRAS     = 0.055f; // sopro durante as palavras — mais alto que o volume normal de fala, pra não confundir falar com soprar
+    [SerializeField] private float SOPRO_LIMIAR_FORTE        = 0.17f;  // volume a partir do qual o sopro conta como "forte" — mais palavras, voo mais longe e mais fundo
+    [SerializeField] private float SOPRO_MIN_DURACAO         = 0.18f;  // segundos seguidos acima do limiar de início pra confirmar sopro de verdade
+    [SerializeField] private float SOPRO_MIN_DURACAO_PALAVRAS = 0.22f; // idem, mas pro limiar das palavras — um pouco mais alto que antes, filtra picos curtos de voz (ex: consoantes)
+    [SerializeField] private float SOPRO_GRACA       = 0.25f;  // segundos de tolerância antes de considerar que parou de soprar
+
     private const float RECONSTRUIR_TIMEOUT = 4f; // segundos de silêncio no mic, durante as palavras, antes de reconstruir a teia
 
     // ── dispersão "física" dos pontos da teia ────────────────────────────
@@ -464,7 +466,7 @@ public class tela1 : MonoBehaviour
         TextMeshProUGUI tmp = textGO.AddComponent<TextMeshProUGUI>();
         tmp.text             = "assopre para";
         tmp.fontSize         = 42f;
-        tmp.color            = new Color(0.227f, 0.180f, 0.122f, 1f);
+        tmp.color            = new Color(160f / 255f, 119f / 255f, 82f / 255f, 1f); // #A07752
         tmp.alignment        = TextAlignmentOptions.Center;
         tmp.characterSpacing = 8f;
         _labelInstrucao      = tmp;
@@ -582,8 +584,12 @@ public class tela1 : MonoBehaviour
         for (int i = 0; i < COUNT; i++)
             _posOrigemReconexao[i] = _pos[i]; // de onde cada ponto está agora, espalhado
 
-        GerarPontos();       // calcula o novo layout final (_basePos) — também já mexe em _pos, que sobrescrevemos abaixo
-        ConstruirDelaunay(); // arestas do layout final, prontas desde já
+        // o layout final (_basePos/_edgeA/_edgeB) já foi calculado uma vez no
+        // Start() e é sempre o mesmo (mesma máscara "PROPAGAR") — recalcular
+        // aqui (GerarPontos + ConstruirDelaunay, ambos pesados: até 2000
+        // tentativas por ponto e uma triangulação de Delaunay inteira) travava
+        // um frame toda vez que a teia reconectava por inatividade. Reaproveita
+        // o layout original em vez de refazer o cálculo.
 
         for (int i = 0; i < COUNT; i++)
         {
@@ -713,7 +719,7 @@ public class tela1 : MonoBehaviour
 
         TextMeshProUGUI tmp = go.AddComponent<TextMeshProUGUI>();
         tmp.text             = palavra;
-        tmp.color            = new Color(0.227f, 0.180f, 0.122f, 0f);
+        tmp.color            = new Color(160f / 255f, 119f / 255f, 82f / 255f, 0f); // #A07752
         tmp.alignment        = TextAlignmentOptions.Center;
         tmp.enableAutoSizing = true; // a fonte se ajusta sozinha pra caber na caixa, palavra grande não nasce cortada
         tmp.fontSizeMin      = PALAVRA_FONTE_MIN;

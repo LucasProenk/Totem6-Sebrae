@@ -50,8 +50,9 @@ public class teiabg : MonoBehaviour
     // cima da animação normal, mais brilho — os pontos não saem muito de
     // onde já estavam. A intensidade sobe suave enquanto assopra e desce
     // suave quando para, sem nunca deixar de cobrir a tela inteira.
-    private const float SOPRO_LIMIAR_MINIMO = 0.008f; // volume a partir do qual a teia já começa a reagir
-    private const float SOPRO_LIMIAR_MAXIMO = 0.09f;  // volume a partir do qual a reação já está no máximo
+    [Header("Sensibilidade do microfone (sopro)")]
+    [SerializeField] private float SOPRO_LIMIAR_MINIMO = 0.055f; // volume a partir do qual a teia já começa a reagir (igual ao limiar de palavras do tela1.cs)
+    [SerializeField] private float SOPRO_LIMIAR_MAXIMO = 0.17f;  // volume a partir do qual a reação já está no máximo
     private const float INTENSIDADE_SUAVIZACAO   = 1.5f; // o quanto a intensidade pode subir/descer por segundo
 
     private const float VIBRACAO_FREQUENCIA     = 22f;   // quão rápido é o tremor (mais alto = mais "zumbido")

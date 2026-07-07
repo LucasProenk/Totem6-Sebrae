@@ -229,6 +229,12 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   _teiaEspessura: 0.02
+  SOPRO_LIMIAR_INICIO: 0.13
+  SOPRO_LIMIAR_PALAVRAS: 0.04
+  SOPRO_LIMIAR_FORTE: 0.14
+  SOPRO_MIN_DURACAO: 0.18
+  SOPRO_MIN_DURACAO_PALAVRAS: 0.18
+  SOPRO_GRACA: 0.25
 --- !u!114 &519420034
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -248,6 +254,8 @@ MonoBehaviour:
   _margemCobertura: 1.15
   _espessuraLinha: 0.027
   _velocidadeAnimacao: 2.66
+  SOPRO_LIMIAR_MINIMO: 0.04
+  SOPRO_LIMIAR_MAXIMO: 0.14
 --- !u!1660057539 &9223372036854775807
 SceneRoots:
   m_ObjectHideFlags: 0
