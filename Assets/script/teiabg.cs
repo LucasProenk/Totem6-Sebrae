@@ -5,9 +5,11 @@ using UnityEngine;
 // Teia de fundo animada, cobrindo a tela inteira, bem transparente mas
 // ainda visível. Anexar direto numa Camera (de preferência a câmera de
 // fundo/atrás da UI) — desenha com GL no OnPostRender, mesmo estilo da
-// teia usada em tela1.cs. Também usa o mesmo padrão de tela1.cs pra
-// assopro no microfone: assoprou, a teia se espalha; parou de assoprar
-// (inatividade), depois de um tempo ela volta se reconectando sozinha.
+// teia usada em tela1.cs. NUNCA dispersa/sai da tela (ela precisa continuar
+// cobrindo a tela inteira o tempo todo, inclusive enquanto as palavras estão
+// voando em tela1.cs) — em vez disso, reage ao assopro no microfone vibrando
+// (tremor rápido e pequeno no lugar) e brilhando mais forte, voltando ao
+// normal aos poucos quando para de soprar.
 [RequireComponent(typeof(Camera))]
 public class teiabg : MonoBehaviour
 {
@@ -42,39 +44,31 @@ public class teiabg : MonoBehaviour
     private const float BRILHO_VELOCIDADE     = 1.6f;
     private const float BRILHO_FORCA          = 0.18f;
 
-    // ── assopro no microfone — mesmo padrão de tela1.cs: sopro confirmado
-    // (sustentado, evita disparar à toa com ruído) espalha a teia; enquanto
-    // a pessoa continuar soprando (mesmo levinho) a teia continua espalhada;
-    // depois de um tempo de silêncio (inatividade) ela reconecta sozinha.
-    private const float SOPRO_LIMIAR_INICIO   = 0.035f; // volume exigido pra DISPARAR a dispersão
-    private const float SOPRO_LIMIAR_CONTINUO = 0.011f; // volume (bem mais sensível) que mantém a teia espalhada
-    private const float SOPRO_MIN_DURACAO          = 0.18f; // segundos seguidos acima do limiar de início pra confirmar sopro de verdade
-    private const float SOPRO_MIN_DURACAO_CONTINUO = 0.10f; // idem, pro limiar contínuo
-    private const float RECONSTRUIR_TIMEOUT  = 4f;    // segundos de silêncio no mic antes de reconectar a teia
+    // ── reação ao assopro — em vez de dispersar/sumir ou de aumentar o
+    // deslocamento da órbita/onda (o que fazia a teia "andar" muito pela
+    // tela), a teia só VIBRA no lugar: um tremor rápido e pequeno somado por
+    // cima da animação normal, mais brilho — os pontos não saem muito de
+    // onde já estavam. A intensidade sobe suave enquanto assopra e desce
+    // suave quando para, sem nunca deixar de cobrir a tela inteira.
+    private const float SOPRO_LIMIAR_MINIMO = 0.008f; // volume a partir do qual a teia já começa a reagir
+    private const float SOPRO_LIMIAR_MAXIMO = 0.09f;  // volume a partir do qual a reação já está no máximo
+    private const float INTENSIDADE_SUAVIZACAO   = 1.5f; // o quanto a intensidade pode subir/descer por segundo
 
-    private const float DISPERSAO_VEL_MIN = 3f;
-    private const float DISPERSAO_VEL_MAX = 7f;
-    private const float DISPERSAO_ACEL    = 6f; // aceleração radial (efeito de "explosão")
+    private const float VIBRACAO_FREQUENCIA     = 22f;   // quão rápido é o tremor (mais alto = mais "zumbido")
+    private const float VIBRACAO_AMPLITUDE_MAX  = 0.05f; // deslocamento máx. do tremor no pico da intensidade — pequeno de propósito
+    private const float INTENSIDADE_BRILHO_MULT = 2f;    // brilho pulsa até 3x mais forte no pico
+    private const float INTENSIDADE_ALPHA_EXTRA = 0.4f;  // aumenta a opacidade máxima no pico
 
-    private const float RECONEXAO_ATRASO_MAX    = 1.0f; // atraso aleatório máx. antes de cada ponto começar a voltar
-    private const float RECONEXAO_DURACAO_PONTO = 1.3f; // tempo que cada ponto leva pra viajar até o lugar final
-
-    enum Estado { Normal, Dispersando, Reconectando }
-    private Estado _estado = Estado.Normal;
+    private float _intensidade; // 0 (parada) .. 1 (assoprando com força), suavizada
 
     private Camera   _cam;
     private Material _mat;
 
     private Vector2[] _basePos;
     private Vector2[] _pos;
-    private Vector2[] _vel;
     private float[]   _phase;
     private float[]   _orbitaRaio;
     private float[]   _orbitaVelocidade;
-
-    private Vector2[] _posOrigemReconexao;
-    private float[]   _atrasoReconexao;
-    private float     _reconexaoTimer;
 
     private int[] _edgeA;
     private int[] _edgeB;
@@ -84,15 +78,10 @@ public class teiabg : MonoBehaviour
     private float _alphaDist;    // distância (calculada a partir da densidade) usada p/ esmaecer linhas longas
     private float _tempoAnimado; // acumula Time.deltaTime * _velocidadeAnimacao — evita pulos se a velocidade mudar em runtime
 
-    // ── microfone / detecção de sopro ────────────────────────────────────
-    private string    _micDevice;
-    private AudioClip _micClip;
-    private float[]   _micBuffer = new float[1024];
-    private float     _volumeSuavizado;
-    private float     _ultimoSoproTime = -999f;
-    private float     _tempoAcimaDoLimiar;
-    private float     _tempoAcimaLimiarContinuo;
-    private bool      _soproConfirmado;
+    // não abre gravação própria de microfone: tela1.cs está na mesma câmera e
+    // já grava do microfone — Unity não suporta dois Microphone.Start()
+    // simultâneos no mesmo dispositivo (o segundo Start() reinicia/rouba o do
+    // primeiro), então aqui só lemos o volume já suavizado por tela1 (tela1.VolumeAtual).
 
     void Start()
     {
@@ -107,7 +96,6 @@ public class teiabg : MonoBehaviour
         AtualizarDimensoesTela();
         GerarPontos();
         ConstruirDelaunay();
-        IniciarMicrofone();
     }
 
     // calcula meia-largura/meia-altura da vista da câmera na profundidade
@@ -126,12 +114,9 @@ public class teiabg : MonoBehaviour
     {
         _basePos          = new Vector2[_quantidadePontos];
         _pos              = new Vector2[_quantidadePontos];
-        _vel              = new Vector2[_quantidadePontos];
         _phase            = new float[_quantidadePontos];
         _orbitaRaio       = new float[_quantidadePontos];
         _orbitaVelocidade = new float[_quantidadePontos];
-        _posOrigemReconexao = new Vector2[_quantidadePontos];
-        _atrasoReconexao    = new float[_quantidadePontos];
 
         float w = _halfWidth  * _margemCobertura;
         float h = _halfHeight * _margemCobertura;
@@ -172,35 +157,32 @@ public class teiabg : MonoBehaviour
 
     void Update()
     {
+        AtualizarIntensidade();
         _tempoAnimado += Time.deltaTime * _velocidadeAnimacao;
 
-        AtualizarMicrofone();
-
-        switch (_estado)
-        {
-            case Estado.Normal:
-                AtualizarOscilacaoNormal();
-                if (_soproConfirmado) IniciarDispersao();
-                break;
-
-            case Estado.Dispersando:
-                AtualizarDispersao();
-                if (!DentroDoTimeoutReconstrucao()) IniciarReconexao();
-                break;
-
-            case Estado.Reconectando:
-                AtualizarReconexao();
-                break;
-        }
+        AtualizarOscilacao();
     }
 
-    // teia parada (estado de repouso): órbita + ondas cruzadas + flutuar
-    // orgânico + respiração global (ver comentário lá em cima das consts).
-    void AtualizarOscilacaoNormal()
+    // lê o volume já suavizado por tela1.cs (mesma câmera, uma única gravação
+    // de microfone compartilhada — ver comentário nos campos) e converte num
+    // 0..1 suavizado que dá a intensidade da reação da teia ao assopro.
+    void AtualizarIntensidade()
+    {
+        float alvo = Mathf.InverseLerp(SOPRO_LIMIAR_MINIMO, SOPRO_LIMIAR_MAXIMO, tela1.VolumeAtual);
+        _intensidade = Mathf.MoveTowards(_intensidade, alvo, INTENSIDADE_SUAVIZACAO * Time.deltaTime);
+    }
+
+    // órbita + ondas cruzadas + flutuar orgânico + respiração global (ver
+    // comentário lá em cima das consts) — essa parte não muda com o sopro.
+    // Por cima disso, assoprar soma só um tremor rápido e pequeno (vibração),
+    // sem aumentar o deslocamento da órbita/onda — a teia treme no lugar, não
+    // sai andando pela tela.
+    void AtualizarOscilacao()
     {
         float t = _tempoAnimado;
         float respiracao = 1f + Mathf.Sin(t * RESPIRACAO_VELOCIDADE) * RESPIRACAO_FORCA;
         float tempoRuido = t * FLUTUAR_VELOCIDADE;
+        float vibAmp     = VIBRACAO_AMPLITUDE_MAX * _intensidade;
 
         for (int i = 0; i < _quantidadePontos; i++)
         {
@@ -217,128 +199,12 @@ public class teiabg : MonoBehaviour
             float fx = (Mathf.PerlinNoise(_phase[i], tempoRuido) - 0.5f) * 2f * FLUTUAR_AMPLITUDE;
             float fy = (Mathf.PerlinNoise(_phase[i] + 37.1f, tempoRuido) - 0.5f) * 2f * FLUTUAR_AMPLITUDE;
 
-            _pos[i] = _basePos[i] * respiracao + new Vector2(ox + ondaX + fx, oy + ondaY + fy);
+            // tremor rápido (vibração) — só aparece/cresce enquanto assopra
+            float vx = Mathf.Sin(t * VIBRACAO_FREQUENCIA        + _phase[i] * 13.7f) * vibAmp;
+            float vy = Mathf.Cos(t * VIBRACAO_FREQUENCIA * 1.3f + _phase[i] * 9.1f)  * vibAmp;
+
+            _pos[i] = _basePos[i] * respiracao + new Vector2(ox + ondaX + fx + vx, oy + ondaY + fy + vy);
         }
-    }
-
-    // =====================================================================
-    // MICROFONE — mesmo padrão de tela1.cs (primeiro dispositivo conectado).
-    // =====================================================================
-    void IniciarMicrofone()
-    {
-        if (Microphone.devices.Length == 0)
-        {
-            Debug.LogWarning("teiabg: nenhum microfone conectado.");
-            return;
-        }
-
-        _micDevice = Microphone.devices[0];
-        _micClip   = Microphone.Start(_micDevice, true, 1, 44100);
-    }
-
-    void AtualizarMicrofone()
-    {
-        if (_micClip == null) return;
-
-        int posicao = Microphone.GetPosition(_micDevice);
-        int inicio  = posicao - _micBuffer.Length;
-        if (inicio < 0) return; // ainda não há amostras suficientes
-
-        _micClip.GetData(_micBuffer, inicio);
-
-        float somaQuadrados = 0f;
-        for (int i = 0; i < _micBuffer.Length; i++)
-            somaQuadrados += _micBuffer[i] * _micBuffer[i];
-
-        float volume = Mathf.Sqrt(somaQuadrados / _micBuffer.Length);
-        _volumeSuavizado = Mathf.Lerp(_volumeSuavizado, volume, Time.deltaTime * 12f);
-
-        // limiar baixo (sopro leve) mantém a teia espalhada enquanto durar —
-        // mas precisa ficar sustentado um instante, senão ruído já conta.
-        if (_volumeSuavizado > SOPRO_LIMIAR_CONTINUO)
-            _tempoAcimaLimiarContinuo += Time.deltaTime;
-        else
-            _tempoAcimaLimiarContinuo = 0f;
-
-        if (_tempoAcimaLimiarContinuo >= SOPRO_MIN_DURACAO_CONTINUO)
-            _ultimoSoproTime = Time.time;
-
-        // limiar alto (sopro forte e sustentado) só conta pra DISPARAR a dispersão inicial.
-        if (_volumeSuavizado > SOPRO_LIMIAR_INICIO)
-            _tempoAcimaDoLimiar += Time.deltaTime;
-        else
-            _tempoAcimaDoLimiar = 0f;
-
-        _soproConfirmado = _tempoAcimaDoLimiar >= SOPRO_MIN_DURACAO;
-    }
-
-    // true enquanto a pessoa ainda está soprando OU faz menos de RECONSTRUIR_TIMEOUT
-    // segundos que parou — só depois disso (inatividade) a teia reconecta.
-    bool DentroDoTimeoutReconstrucao()
-    {
-        return (Time.time - _ultimoSoproTime) < RECONSTRUIR_TIMEOUT;
-    }
-
-    // =====================================================================
-    // DISPERSÃO — sopro confirmado: cada ponto ganha uma velocidade radial
-    // (pra fora do centro) que vai acelerando, como se a teia explodisse
-    // e saísse voando da tela. Mesma física de tela1.cs.
-    // =====================================================================
-    void IniciarDispersao()
-    {
-        _estado = Estado.Dispersando;
-
-        for (int i = 0; i < _quantidadePontos; i++)
-        {
-            Vector2 baseDir = _pos[i].sqrMagnitude > 0.0001f ? _pos[i].normalized : Random.insideUnitCircle.normalized;
-            float   desvio  = Random.Range(-25f, 25f);
-            Vector2 dir     = Quaternion.Euler(0f, 0f, desvio) * baseDir;
-            _vel[i] = dir * Random.Range(DISPERSAO_VEL_MIN, DISPERSAO_VEL_MAX);
-        }
-    }
-
-    void AtualizarDispersao()
-    {
-        for (int i = 0; i < _quantidadePontos; i++)
-        {
-            Vector2 dir = _vel[i].normalized;
-            _vel[i] += dir * DISPERSAO_ACEL * Time.deltaTime;
-            _pos[i] += _vel[i] * Time.deltaTime;
-        }
-    }
-
-    // =====================================================================
-    // RECONEXÃO — a teia volta de onde os pontos estão (espalhados pela
-    // dispersão) até o layout original, cada ponto com um atraso aleatório e
-    // chegando aos poucos, "costurando" a teia de novo. Mesma lógica de tela1.cs.
-    // =====================================================================
-    void IniciarReconexao()
-    {
-        for (int i = 0; i < _quantidadePontos; i++)
-        {
-            _posOrigemReconexao[i] = _pos[i];
-            _atrasoReconexao[i]    = Random.Range(0f, RECONEXAO_ATRASO_MAX);
-        }
-
-        _reconexaoTimer = 0f;
-        _estado = Estado.Reconectando;
-    }
-
-    void AtualizarReconexao()
-    {
-        _reconexaoTimer += Time.deltaTime;
-
-        bool todasChegaram = true;
-        for (int i = 0; i < _quantidadePontos; i++)
-        {
-            float tLocal = Mathf.Clamp01((_reconexaoTimer - _atrasoReconexao[i]) / RECONEXAO_DURACAO_PONTO);
-            if (tLocal < 1f) todasChegaram = false;
-
-            float suave = 1f - (1f - tLocal) * (1f - tLocal); // ease-out: desacelera ao chegar no lugar
-            _pos[i] = Vector2.Lerp(_posOrigemReconexao[i], _basePos[i], suave);
-        }
-
-        if (todasChegaram) _estado = Estado.Normal;
     }
 
     void OnPostRender()
@@ -351,7 +217,9 @@ public class teiabg : MonoBehaviour
         // plataformas e sempre sai com 1px.
         GL.Begin(GL.QUADS);
 
-        float meiaEspessura = _espessuraLinha * 0.5f;
+        float meiaEspessura  = _espessuraLinha * 0.5f;
+        float opacidadeAtual = Mathf.Clamp01(_opacidadeMaxima + _intensidade * INTENSIDADE_ALPHA_EXTRA);
+        float brilhoForca    = BRILHO_FORCA * (1f + _intensidade * INTENSIDADE_BRILHO_MULT);
 
         for (int e = 0; e < _edgeA.Length; e++)
         {
@@ -359,10 +227,10 @@ public class teiabg : MonoBehaviour
             Vector2 pb2 = _pos[_edgeB[e]];
 
             float dist  = Vector2.Distance(pa2, pb2);
-            float alpha = Mathf.Clamp01(Mathf.Lerp(1f, 0f, dist / _alphaDist)) * _opacidadeMaxima;
+            float alpha = Mathf.Clamp01(Mathf.Lerp(1f, 0f, dist / _alphaDist)) * opacidadeAtual;
             if (alpha <= 0.002f) continue;
 
-            float brilho = 1f - BRILHO_FORCA + BRILHO_FORCA * Mathf.Sin(_tempoAnimado * BRILHO_VELOCIDADE + e * 0.37f);
+            float brilho = 1f - brilhoForca + brilhoForca * Mathf.Sin(_tempoAnimado * BRILHO_VELOCIDADE + e * 0.37f);
             alpha *= brilho;
 
             Vector2 dir  = dist > 0.0001f ? (pb2 - pa2) / dist : Vector2.right;
@@ -386,7 +254,6 @@ public class teiabg : MonoBehaviour
     void OnDestroy()
     {
         if (_mat != null) Destroy(_mat);
-        if (_micDevice != null && Microphone.IsRecording(_micDevice)) Microphone.End(_micDevice);
     }
 
     // =====================================================================

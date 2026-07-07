@@ -45,21 +45,6 @@ public class tela1 : MonoBehaviour
     private int[] _edgeA;
     private int[] _edgeB;
 
-    // ── teia ambiente — uma teia leve e independente, só pra não deixar a
-    // tela vazia enquanto as palavras estão voando (a teia principal está
-    // toda dispersa/fora da tela nessa hora) ────────────────────────────────
-    private Vector2[] _ambientePos;
-    private Vector2[] _ambienteBase;
-    private float[]   _ambienteFreq;
-    private float[]   _ambienteFase;
-    private int[]     _ambienteEdgeA;
-    private int[]     _ambienteEdgeB;
-
-    private const int   AMBIENTE_COUNT      = 600; // densa, cobrindo a tela inteira como a teia principal
-    private const float AMBIENTE_ALPHA      = 0.3f;
-    private const float AMBIENTE_ALPHA_DIST = 2.0f;
-    private const float AMBIENTE_VIBRACAO   = 0.65f; // o quanto o sopro faz a teia ambiente tremer
-
     // ── estado geral (sopro → teia se espalha (já soltando palavras) → palavras → reconecta) ──
     enum Estado { Normal, Dispersando, Palavras, Reconectando }
     private Estado _estado = Estado.Normal;
@@ -75,10 +60,13 @@ public class tela1 : MonoBehaviour
     private const float RECONEXAO_DURACAO_PONTO = 1.3f; // tempo que cada ponto leva pra viajar até o lugar final
 
     // ── microfone / detecção de sopro ────────────────────────────────────
+    // static porque teiabg.cs está na mesma câmera e reaproveita esta MESMA
+    // gravação (Unity não suporta dois Microphone.Start() simultâneos no
+    // mesmo dispositivo — o segundo Start() reinicia/rouba o do primeiro).
     private string  _micDevice;
     private AudioClip _micClip;
     private float[] _micBuffer = new float[1024];
-    private float   _volumeSuavizado;
+    private static float _volumeSuavizado;
     private float   _ultimoSoproTime = -999f;
     private float   _tempoAcimaDoLimiar;         // quanto tempo seguido o volume está acima do limiar de início
     private float   _tempoAcimaLimiarPalavras;   // quanto tempo seguido o volume está acima do limiar (leve) das palavras
@@ -92,8 +80,8 @@ public class tela1 : MonoBehaviour
     private float   _forcaSopro;
     private const float FORCA_SOPRO_SUAVIZACAO = 0.55f; // o quanto _forcaSopro pode mudar por segundo (menor = mais suave/lento)
 
-    private const float SOPRO_LIMIAR_INICIO       = 0.035f; // sopro mais forte, exigido só pra DISPARAR a dispersão (evita ativar à toa)
-    private const float SOPRO_LIMIAR_PALAVRAS     = 0.011f; // sopro durante as palavras — bem mais sensível, pega sopro bem leve
+    private const float SOPRO_LIMIAR_INICIO       = 0.026f; // sopro mais forte, exigido só pra DISPARAR a dispersão (evita ativar à toa)
+    private const float SOPRO_LIMIAR_PALAVRAS     = 0.008f; // sopro durante as palavras — bem mais sensível, pega sopro bem leve
     private const float SOPRO_LIMIAR_FORTE        = 0.09f;  // volume a partir do qual o sopro conta como "forte" — mais palavras, voo mais longe e mais fundo
     private const float SOPRO_MIN_DURACAO         = 0.18f;  // segundos seguidos acima do limiar de início pra confirmar sopro de verdade
     private const float SOPRO_MIN_DURACAO_PALAVRAS = 0.10f; // idem, mas pro limiar das palavras — reage mais rápido a um sopro leve
@@ -140,13 +128,13 @@ public class tela1 : MonoBehaviour
 
     // espaçamento entre um spawn e outro — sopro fraco/normal nasce mais devagar,
     // sopro forte sustentado nasce bem mais rápido (mais palavras vindo).
-    private const float PALAVRA_SPAWN_COOLDOWN_FRACO = 0.5f;
-    private const float PALAVRA_SPAWN_COOLDOWN_FORTE = 0.15f;
+    private const float PALAVRA_SPAWN_COOLDOWN_FRACO = 0.3f;
+    private const float PALAVRA_SPAWN_COOLDOWN_FORTE = 0.06f;
 
     // quantas palavras cabem na tela ao mesmo tempo — cresce com a força do sopro
-    // (sopro fraco/normal = 3, sopro forte sustentado = até 7 de uma vez).
-    private const int   PALAVRA_MAX_SIMULTANEAS_BASE  = 3;
-    private const int   PALAVRA_MAX_SIMULTANEAS_FORTE = 7;
+    // (sopro fraco/normal = 6, sopro forte sustentado = até 14 de uma vez).
+    private const int   PALAVRA_MAX_SIMULTANEAS_BASE  = 6;
+    private const int   PALAVRA_MAX_SIMULTANEAS_FORTE = 14;
 
     private const float PALAVRA_CRESCE_FRACAO = 0.15f; // fração inicial do progresso = nascendo/crescendo
     private const float PALAVRA_FADE_FRACAO   = 0.3f;  // fração final do progresso = sumindo
@@ -161,7 +149,8 @@ public class tela1 : MonoBehaviour
     private const float PALAVRA_SOBE_DIST_FRACO   = 400f;
     private const float PALAVRA_SOBE_DIST_FORTE   = 1250f;
 
-    private const float PALAVRA_SPAWN_BAIXO   = 380f;   // o quão abaixo do centro ela nasce (sempre centralizada, x = 0)
+    private const float PALAVRA_SPAWN_BAIXO   = 380f;   // o quão abaixo do centro ela nasce, em média
+    private const float PALAVRA_SPAWN_BAIXO_VARIACAO = 300f; // varia esse "abaixo" bastante pra cada palavra nascer visivelmente mais pra cima ou mais pra baixo que a outra
     private const float PALAVRA_TOMBO_MAX     = 50f;    // giro extra aleatório (graus) simulando o galho tombando no vento
     private const float PALAVRA_CAIXA_LARGURA = 950f;   // largura segura da caixa de texto (cabe na tela física sem cortar)
     private const float PALAVRA_FONTE_MAX     = 90f;
@@ -217,61 +206,9 @@ public class tela1 : MonoBehaviour
 
         GerarPontos();
         ConstruirDelaunay();
-        GerarPontosAmbiente();
         ConstruirCanvasTexto();
         CarregarPalavras();
         IniciarMicrofone();
-    }
-
-    // teia leve e independente da principal, usada só como decoração de fundo
-    // enquanto as palavras estão voando (evita a tela ficar vazia nessa hora)
-    void GerarPontosAmbiente()
-    {
-        _ambienteBase = new Vector2[AMBIENTE_COUNT];
-        _ambientePos  = new Vector2[AMBIENTE_COUNT];
-        _ambienteFreq = new float[AMBIENTE_COUNT];
-        _ambienteFase = new float[AMBIENTE_COUNT];
-
-        for (int i = 0; i < AMBIENTE_COUNT; i++)
-        {
-            _ambienteBase[i] = new Vector2(Random.Range(-8.5f, 8.5f), Random.Range(-4.8f, 4.8f));
-            _ambientePos[i]  = _ambienteBase[i];
-            _ambienteFreq[i] = Random.Range(0.3f, 0.9f);
-            _ambienteFase[i] = Random.Range(0f, Mathf.PI * 2f);
-        }
-
-        var triangulos    = Delaunay.Triangular(_ambienteBase.ToList());
-        var arestasUnicas = new HashSet<(int, int)>();
-        foreach (var t in triangulos)
-        {
-            AdicionarAresta(arestasUnicas, t.a, t.b);
-            AdicionarAresta(arestasUnicas, t.b, t.c);
-            AdicionarAresta(arestasUnicas, t.c, t.a);
-        }
-
-        _ambienteEdgeA = arestasUnicas.Select(e => e.Item1).ToArray();
-        _ambienteEdgeB = arestasUnicas.Select(e => e.Item2).ToArray();
-    }
-
-    void AtualizarAmbiente()
-    {
-        // quanto mais sopro estiver "sobrando" no volume atual, mais a teia treme.
-        // Usa ruído Perlin (contínuo/suave) em vez de Random.value puro a cada
-        // frame — isso evita o tremor "sujo"/estático e dá uma vibração mais
-        // orgânica, fluida.
-        float vibracao = _volumeSuavizado * AMBIENTE_VIBRACAO;
-        float tempoRuido = Time.time * 1.3f;
-
-        for (int i = 0; i < AMBIENTE_COUNT; i++)
-        {
-            float ox = Mathf.Sin(Time.time * _ambienteFreq[i] + _ambienteFase[i]) * 0.08f;
-            float oy = Mathf.Cos(Time.time * _ambienteFreq[i] + _ambienteFase[i] + 1f) * 0.08f;
-
-            float vx = (Mathf.PerlinNoise(_ambienteFase[i], tempoRuido) - 0.5f) * 2f * vibracao;
-            float vy = (Mathf.PerlinNoise(_ambienteFase[i] + 37.1f, tempoRuido) - 0.5f) * 2f * vibracao;
-
-            _ambientePos[i] = _ambienteBase[i] + new Vector2(ox + vx, oy + vy);
-        }
     }
 
     // =====================================================================
@@ -307,6 +244,10 @@ public class tela1 : MonoBehaviour
         _micDevice = Microphone.devices[0];
         _micClip   = Microphone.Start(_micDevice, true, 1, 44100);
     }
+
+    // exposto pra teiabg.cs (mesma câmera) ler o volume já suavizado em vez
+    // de abrir sua própria gravação do microfone.
+    public static float VolumeAtual => _volumeSuavizado;
 
     void AtualizarMicrofone()
     {
@@ -683,8 +624,6 @@ public class tela1 : MonoBehaviour
     // =====================================================================
     void AtualizarPalavras()
     {
-        AtualizarAmbiente(); // teia leve de fundo, só pra não ficar vazio
-
         // força do sopro suavizada (0..1) — não pula pro valor novo na hora, vai
         // subindo/descendo aos poucos, então sopro sustentado acelera suavemente
         // e um sopro mais forte só se reflete no movimento aos poucos, sem tranco.
@@ -781,10 +720,12 @@ public class tela1 : MonoBehaviour
         tmp.fontSizeMax      = PALAVRA_FONTE_MAX;
 
         // nasce um pouco abaixo do meio da tela, com um desvio lateral aleatório
-        // (pra não empilhar quando várias nascem juntas); o desvio de ângulo
-        // (sorteado por palavra) é o que faz ela ir se afastando pro seu lado
-        // conforme sobe, espalhando ainda mais o voo de cada uma.
-        Vector2 posInicial = -EIXO_CIMA * PALAVRA_SPAWN_BAIXO
+        // (pra não empilhar quando várias nascem juntas) e também um desvio
+        // aleatório pra cima/baixo (pra não nascerem sempre na mesma altura); o
+        // desvio de ângulo (sorteado por palavra) é o que faz ela ir se
+        // afastando pro seu lado conforme sobe, espalhando ainda mais o voo de cada uma.
+        float   baixo       = PALAVRA_SPAWN_BAIXO + Random.Range(-PALAVRA_SPAWN_BAIXO_VARIACAO, PALAVRA_SPAWN_BAIXO_VARIACAO);
+        Vector2 posInicial  = -EIXO_CIMA * baixo
                             + new Vector2(-EIXO_CIMA.y, EIXO_CIMA.x) * Random.Range(-PALAVRA_SPAWN_LADO, PALAVRA_SPAWN_LADO);
         float   angulo     = Random.Range(-ANGULO_MAX_VOO, ANGULO_MAX_VOO);
         Vector2 direcao    = Quaternion.Euler(0f, 0f, angulo) * EIXO_CIMA;
@@ -855,31 +796,10 @@ public class tela1 : MonoBehaviour
         GL.End();
 
         GL.Begin(GL.LINES);
-        if (_estado == Estado.Normal)                                        DrawConexoesTexto();
-        if (_estado == Estado.Palavras || _estado == Estado.Dispersando)     DrawTeiaAmbiente();
+        if (_estado == Estado.Normal) DrawConexoesTexto();
         GL.End();
 
         GL.PopMatrix();
-    }
-
-    // teia leve e independente rodando só durante as palavras — a teia
-    // principal está toda dispersa fora da tela nessa hora, então isso evita
-    // a tela ficar vazia/sem graça atrás das palavras voando.
-    void DrawTeiaAmbiente()
-    {
-        for (int e = 0; e < _ambienteEdgeA.Length; e++)
-        {
-            Vector2 pa = _ambientePos[_ambienteEdgeA[e]];
-            Vector2 pb = _ambientePos[_ambienteEdgeB[e]];
-
-            float dist  = Vector2.Distance(pa, pb);
-            float alpha = Mathf.Clamp01(Mathf.Lerp(AMBIENTE_ALPHA, 0f, dist / AMBIENTE_ALPHA_DIST));
-            if (alpha <= 0.002f) continue;
-
-            GL.Color(new Color(0.227f, 0.180f, 0.122f, alpha));
-            GL.Vertex3(pa.x, pa.y, 0);
-            GL.Vertex3(pb.x, pb.y, 0);
-        }
     }
 
     // linhas finas saindo de pontos externos da teia, esticando pra fora —
