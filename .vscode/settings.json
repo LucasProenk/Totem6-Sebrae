@@ -56,5 +56,5 @@
         "temp/": true,
         "Temp/": true
     },
-    "dotnet.defaultSolution": "Totem6-Sebrae.sln"
+    "dotnet.defaultSolution": "Totem.sln"
 }
